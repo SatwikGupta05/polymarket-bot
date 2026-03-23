@@ -136,7 +136,7 @@ def _pre_settlement_price(market, winner_idx):
 
 
 # ================= FETCH =================
-def fetch_markets(limit=200):
+def fetch_markets(limit=200, category=None):
     """
     Fetch closed+resolved markets from Polymarket Gamma API.
 
@@ -165,6 +165,8 @@ def fetch_markets(limit=200):
             "order":     "volume",
             "ascending": "false",
         }
+        if category:
+            params["category"] = category
         try:
             resp = httpx.get(f"{GAMMA_API}/markets", params=params, timeout=15)
             resp.raise_for_status()
@@ -313,7 +315,7 @@ def kelly_size(prob, price, balance):
 
 
 # ================= BACKTEST =================
-def run_backtest(markets, verbose=False):
+def run_backtest(markets, verbose=False, min_volume=None, category=None):
     """
     HOW THE BET DECISION WORKS:
     ===========================
@@ -345,10 +347,18 @@ def run_backtest(markets, verbose=False):
     skip_small_size  = 0
     skip_low_volume  = 0
 
+    volume_threshold = MIN_VOLUME if min_volume is None else float(min_volume)
+    category_filter = category.lower() if category else None
+
     for raw in markets:
+        if category_filter:
+            market_category = str(raw.get("category", "") or "").lower()
+            if market_category != category_filter:
+                continue
+
         # --- Volume filter ---
         volume = float(raw.get("volume", 0) or 0)
-        if volume < MIN_VOLUME:
+        if volume < volume_threshold:
             skip_low_volume += 1
             continue
 
@@ -594,6 +604,8 @@ def generate_html_report(metrics, trades):
 def main():
     parser = argparse.ArgumentParser(description="Polymarket AI Bot Backtest")
     parser.add_argument("--limit",    type=int,           default=200)
+    parser.add_argument("--category", type=str,           default=None, help="Filter markets by category")
+    parser.add_argument("--min-volume", type=float,       default=500,  dest="min_volume", help="Minimum market volume")
     parser.add_argument("--offline",  action="store_true", help="Synthetic data, no API")
     parser.add_argument("--report",   action="store_true", help="Generate HTML report")
     parser.add_argument("--diagnose", action="store_true", help="Print raw API fields")
@@ -604,7 +616,7 @@ def main():
         print("Offline mode: 300 synthetic markets.")
         markets = generate_offline_markets(300)
     else:
-        markets = fetch_markets(args.limit)
+        markets = fetch_markets(args.limit, category=args.category)
         if not markets:
             print("No markets. Try --offline")
             return
@@ -613,7 +625,12 @@ def main():
         diagnose_markets(markets)
         return
 
-    balance, trades, max_dd = run_backtest(markets, verbose=args.verbose)
+    balance, trades, max_dd = run_backtest(
+        markets,
+        verbose=args.verbose,
+        min_volume=args.min_volume,
+        category=args.category,
+    )
     metrics = compute_metrics(trades, balance, max_dd)
 
     print("===== RESULTS =====")
