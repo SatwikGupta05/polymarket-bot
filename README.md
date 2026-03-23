@@ -57,8 +57,8 @@ python cli.py backtest --offline --report
 |------|----------|-------|--------|
 | Lead Forecaster | Groq | llama-3.3-70b-versatile | 30% |
 | Bull Researcher | Groq | mixtral-8x7b-32768 | 20% |
-| Bear Researcher | Gemini | gemini-1.5-flash | 15% |
-| News Analyst | Gemini | gemini-1.5-flash | 20% |
+| Bear Researcher | Gemini | gemini-3.1-flash-lite-preview | 15% |
+| News Analyst | Gemini | gemini-3.1-flash-lite-preview | 20% |
 | Risk Manager | Groq | llama-3.1-8b-instant | 15% |
 
 **Free keys needed (both instant signup, no credit card):**
