@@ -32,6 +32,8 @@ cp env.template .env
 
 # 3. Reset demo state and run
 python scripts/reset_demo.py
+python cli.py run --paper
+```
 ## Architecture Flowchart
 
 Below is a higher-level flowchart that captures ingestion, model routing (free + paid), the five role-based agents, decisioning, execution and tracking. Paste this into any Markdown viewer that supports Mermaid diagrams (e.g., GitHub, VS Code Markdown Preview, or the Streamlit docs renderer).
@@ -61,14 +63,10 @@ flowchart LR
     ModelRouter --> Bear
     ModelRouter --> NewsA
     ModelRouter --> Risk
-    ## Demo & Utilities
+  end
+```
 
-    Demo instructions and utility scripts live in the `docs/` and `scripts/` folders. Refer to those locations for recording guidance, demo setup, and small helpers such as `remove_all_emojis.py` and `reset_demo.py`.
-
-    If you want the full demo checklist or individual utility examples restored in the README, tell me which parts to bring back and I'll insert a concise version.
-
-    ---
-### Observability
+## Observability
 - **Real-time Streamlit dashboard** — portfolio value, positions, P&L, AI decision logs
 - **Paper trading mode** — simulate trades, track outcomes on settled markets
 - **SQLite telemetry** — every trade, AI decision, and cost metric logged locally
@@ -101,76 +99,73 @@ Below is a high-level flowchart of the end-to-end system showing ingestion, mode
 
 ```mermaid
 flowchart LR
-  subgraph INGEST
-    Polymarket[Polymarket / Gamma API]
-    News[RSS / News Feeds]
-    Ingest[Market Ingestion Job]
-    Polymarket --> Ingest
+  subgraph INGEST["Market Ingest"]
+    Polymarket["Polymarket API"]
+    News["RSS/News Feeds"]
+    Polymarket --> Ingest["Filtering"]
     News --> Ingest
   end
 
-  subgraph MODEL_ROUTER
-    ModelRouter[ModelRouter]
-    %% Paid tier breakdown (explicit models)
-    subgraph PAID_TIER[Paid Tier]
-      xAI[xAI Client]\n(Grok-beta)
-      OpenRouter[OpenRouter]
-      GrokBeta[Grok-beta (xAI)]
-      OR_GPT4[GPT-4o (OpenRouter)]
-      OR_Gemini[Gemini Flash 1.5 (OpenRouter)]
-      OR_Claude[Claude 3.5 Sonnet (OpenRouter)]
-      OR_DeepSeek[DeepSeek R1 (OpenRouter)]
-      xAI --> GrokBeta
-      OpenRouter --> OR_GPT4
-      OpenRouter --> OR_Gemini
-      OpenRouter --> OR_Claude
-      OpenRouter --> OR_DeepSeek
-    end
-    Free[Free Model Client]\n(Groq + Gemini)
-    ModelRouter --> xAI
-    ModelRouter --> OpenRouter
-    ModelRouter --> Free
+  subgraph MODELS["Paid AI Models (5 Agents)"]
+    Lead["Lead Forecaster<br/>(Grok-beta)"]
+    Bull["Bull Researcher<br/>(GPT-4o)"]
+    Bear["Bear Researcher<br/>(Gemini 1.5)"]
+    NewsA["News Analyst<br/>(Claude 3.5)"]
+    Risk["Risk Manager<br/>(DeepSeek R1)"]
   end
 
-  Ingest --> ModelRouter
-
-  subgraph AGENTS
-    Forecaster[Forecaster Agent]
-    Bull[Bull Researcher]
-    Bear[Bear Researcher]
-    NewsA[News Analyst]
-    Risk[Risk Manager]
+  subgraph AGENTS["Agent Layer"]
+    FAg["Forecaster"]
+    BAg["Bull"]
+    BEAg["Bear"]
+    NAg["News"]
+    RAg["Risk"]
   end
 
-  ModelRouter --> Forecaster
-  ModelRouter --> Bull
-  ModelRouter --> Bear
-  ModelRouter --> NewsA
-  ModelRouter --> Risk
+  Ingest --> Lead
+  Ingest --> Bull
+  Ingest --> Bear
+  Ingest --> NewsA
+  Ingest --> Risk
 
-  Forecaster & Bull & Bear & NewsA & Risk --> Ensemble[Ensemble / Structured Debate]
-  Ensemble --> Validator[Consensus & Filters\n(edge / confidence / SKIP handling)]
+  Lead --> FAg
+  Bull --> BAg
+  Bear --> BEAg
+  NewsA --> NAg
+  Risk --> RAg
 
-  Validator --> Portfolio[Portfolio Optimizer]
-  Validator --> MarketMaking[Market Making Strategy]
-  Validator --> QuickFlip[Quick Flip Scalping]
+  FAg --> Ensemble["5-Model Ensemble Debate"]
+  BAg --> Ensemble
+  BEAg --> Ensemble
+  NAg --> Ensemble
+  RAg --> Ensemble
 
-  Portfolio --> Executor[Unified Trading System]
-  MarketMaking --> Executor
-  QuickFlip --> Executor
+  Ensemble --> Filter["Confidence & Edge Filter"]
 
-  Executor --> CLOB[Polymarket CLOB / Order API]
-  Executor --> DB[SQLite - Decisions & Positions]
-  CLOB --> DB
+  Filter --> Portfolio["Portfolio Optimizer"]
+  Filter --> MM["Market Making"]
+  Filter --> QF["Quick Flip"]
 
-  DB --> Tracker[Position Tracking & Exits]
-  DB --> Dashboard[Streamlit Dashboard & Logs]
+  Portfolio --> Execute["Execute on Polymarket"]
+  MM --> Execute
+  QF --> Execute
 
-  Tracker --> Evaluation[Performance Metrics & Cost Analysis]
-  Evaluation --> Dashboard
+  Execute --> CLOB["CLOB API"]
+  CLOB --> DB["SQLite Telemetry"]
 
-  classDef infra fill:#f3f4f6,stroke:#333,stroke-width:1px;
-  class ModelRouter,Polymarket,CLOB,DB infra;
+  DB --> Exits["Exit Manager"]
+  DB --> Dashboard["Streamlit Dashboard"]
+
+  Exits --> PnL["P&L & Metrics"]
+  Dashboard --> PnL
+
+  classDef paid fill:#ffe0b2,stroke:#e65100,stroke-width:2px,color:#000
+  classDef agent fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000
+  classDef infra fill:#eceff1,stroke:#37474f,stroke-width:1px,color:#000
+
+  class Lead,Bull,Bear,NewsA,Risk paid
+  class FAg,BAg,BEAg,NAg,RAg agent
+  class CLOB,DB infra
 ```
 
 
