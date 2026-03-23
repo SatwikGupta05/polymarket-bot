@@ -144,6 +144,85 @@ The bot runs a four-stage pipeline on a continuous loop:
   Feeds                Confidence Calibration                         Scores
 ```
 
+## Architecture Flowchart
+
+Below is a high-level flowchart of the end-to-end system showing ingestion, model routing, agents, decisioning, execution and tracking. Paste this into any Markdown viewer that supports Mermaid diagrams (e.g., GitHub, VS Code Markdown Preview, or the Streamlit docs renderer).
+
+```mermaid
+flowchart LR
+  subgraph INGEST
+    Polymarket[Polymarket / Gamma API]
+    News[RSS / News Feeds]
+    Ingest[Market Ingestion Job]
+    Polymarket --> Ingest
+    News --> Ingest
+  end
+
+  subgraph MODEL_ROUTER
+    ModelRouter[ModelRouter]
+    %% Paid tier breakdown (explicit models)
+    subgraph PAID_TIER[Paid Tier]
+      xAI[xAI Client]\n(Grok-beta)
+      OpenRouter[OpenRouter]
+      GrokBeta[Grok-beta (xAI)]
+      OR_GPT4[GPT-4o (OpenRouter)]
+      OR_Gemini[Gemini Flash 1.5 (OpenRouter)]
+      OR_Claude[Claude 3.5 Sonnet (OpenRouter)]
+      OR_DeepSeek[DeepSeek R1 (OpenRouter)]
+      xAI --> GrokBeta
+      OpenRouter --> OR_GPT4
+      OpenRouter --> OR_Gemini
+      OpenRouter --> OR_Claude
+      OpenRouter --> OR_DeepSeek
+    end
+    Free[Free Model Client]\n(Groq + Gemini)
+    ModelRouter --> xAI
+    ModelRouter --> OpenRouter
+    ModelRouter --> Free
+  end
+
+  Ingest --> ModelRouter
+
+  subgraph AGENTS
+    Forecaster[Forecaster Agent]
+    Bull[Bull Researcher]
+    Bear[Bear Researcher]
+    NewsA[News Analyst]
+    Risk[Risk Manager]
+  end
+
+  ModelRouter --> Forecaster
+  ModelRouter --> Bull
+  ModelRouter --> Bear
+  ModelRouter --> NewsA
+  ModelRouter --> Risk
+
+  Forecaster & Bull & Bear & NewsA & Risk --> Ensemble[Ensemble / Structured Debate]
+  Ensemble --> Validator[Consensus & Filters\n(edge / confidence / SKIP handling)]
+
+  Validator --> Portfolio[Portfolio Optimizer]
+  Validator --> MarketMaking[Market Making Strategy]
+  Validator --> QuickFlip[Quick Flip Scalping]
+
+  Portfolio --> Executor[Unified Trading System]
+  MarketMaking --> Executor
+  QuickFlip --> Executor
+
+  Executor --> CLOB[Polymarket CLOB / Order API]
+  Executor --> DB[SQLite - Decisions & Positions]
+  CLOB --> DB
+
+  DB --> Tracker[Position Tracking & Exits]
+  DB --> Dashboard[Streamlit Dashboard & Logs]
+
+  Tracker --> Evaluation[Performance Metrics & Cost Analysis]
+  Evaluation --> Dashboard
+
+  classDef infra fill:#f3f4f6,stroke:#333,stroke-width:1px;
+  class ModelRouter,Polymarket,CLOB,DB infra;
+```
+
+
 ### Stage 1 — Ingest
 Active markets are fetched from the Polymarket Gamma API every 60 seconds. Markets are filtered by volume, time to expiry, and category score. Top 5 markets by volume are passed to the AI for cost-efficient analysis.
 
@@ -531,6 +610,16 @@ Lower thresholds in `src/config/settings.py`, then reset:
 python scripts/reset_demo.py
 python cli.py run --paper
 ```
+
+**Customizing Filters:**
+You can tune the bot's aggressiveness by editing the filter settings. Typical places to change are `src/config/settings.py` (e.g. `min_confidence_to_trade`, `min_volume`, `min_trade_edge`, `max_ai_cost_per_decision`) and the edge thresholds in `src/utils/edge_filter.py` (e.g. `MIN_EDGE_REQUIREMENT`, `HIGH_CONFIDENCE_EDGE`). After making changes restart the demo state and run the bot again:
+
+```bash
+python scripts/reset_demo.py
+python cli.py run --paper
+```
+
+Lowering thresholds increases the number of signals and risk; raise them to be more conservative.
 
 **Groq / Gemini 429 rate limit errors:**
 Free tier supports approximately 1 request per 6-8 seconds. Built-in throttling handles this automatically. If still seeing errors, increase scan interval in `settings.py`:

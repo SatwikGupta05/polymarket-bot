@@ -109,10 +109,28 @@ async def _run_ensemble_decision(
 
         # If debate produced a valid action, return it
         action = debate_result.get("action", "SKIP").upper()
+
+        # FIX: SKIP is a valid, deliberate AI response — not a failure.
+        # Log it properly instead of returning None and triggering fallback.
+        if action == "SKIP":
+            logger.info(
+                f"Ensemble decision: SKIP for {market_data.get('ticker','?')[:20]} "
+                f"confidence={debate_result.get('confidence', 0):.2f} — "
+                f"no trade (AI explicitly declined)"
+            )
+            # Return a SKIP result so decide.py knows AI ran successfully
+            return {
+                "action": "SKIP",
+                "side": debate_result.get("side", "YES"),
+                "confidence": debate_result.get("confidence", 0.0),
+                "limit_price": debate_result.get("limit_price", 50),
+                "reasoning": debate_result.get("reasoning", "AI explicitly skipped this market"),
+            }
+
         if action in ("BUY", "SELL"):
             logger.info(
                 f"Ensemble decision: {action} {debate_result.get('side')} "
-                f"confidence={debate_result.get('confidence'):.2f}"
+                f"confidence={debate_result.get('confidence', 0):.2f}"
             )
             return debate_result
 
@@ -253,7 +271,10 @@ async def make_decision_for_market(
 
         # --- Standard LLM Decision-Making ---
         # Feature flags
-        multi_model_ensemble = getattr(settings, 'multi_model_ensemble', False) or (
+        # FIX: settings.ensemble.enabled is the authoritative flag.
+        # The loose settings.multi_model_ensemble attribute doesn't exist on
+        # the dataclass so getattr always returned False — ensemble never ran.
+        multi_model_ensemble = (
             hasattr(settings, 'ensemble') and settings.ensemble.enabled
         )
         # Only enable sentiment if paid keys exist (free-tier uses keyword fallback)
@@ -391,8 +412,18 @@ async def make_decision_for_market(
 
         if decision.action == "BUY" and decision.confidence >= settings.trading.min_confidence_to_trade:
             price = market.yes_price if decision.side == "YES" else market.no_price
-            
-            # Apply Grok4 edge filtering - 10% minimum edge requirement
+
+            # PRICE GUARD: reject prices below 1 cent — they produce insane quantities
+            # and are almost always a data error from the 0.5 fallback or bad API response
+            if price < 0.01 or price > 0.99:
+                logger.warning(
+                    f"[SKIP] Invalid price {price:.4f} for {market.market_id} — "
+                    f"must be between 0.01 and 0.99. Skipping."
+                )
+                await db_manager.record_market_analysis(
+                    market.market_id, "SKIP", 0.0, total_analysis_cost, "invalid_price"
+                )
+                return None
             from src.utils.edge_filter import EdgeFilter
             
             # Calculate market probabilities and AI confidence

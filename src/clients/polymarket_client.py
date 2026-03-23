@@ -385,31 +385,65 @@ class PolymarketClient(TradingLoggerMixin):
         yes_token = next((t for t in tokens if t.get("outcome", "").upper() == "YES"), {})
         no_token  = next((t for t in tokens if t.get("outcome", "").upper() == "NO"),  {})
 
-        # Use the same bid/ask averaging logic validated by the debug script.
+        def _safe_price(val) -> float:
+            """Convert a raw price value to 0-1 float, return 0.0 if invalid."""
+            try:
+                p = float(val)
+                if p > 1.0:
+                    p = p / 100.0
+                return round(p, 4) if 0.01 <= p <= 0.99 else 0.0
+            except (TypeError, ValueError):
+                return 0.0
+
         def _price_from_token(token: dict) -> float:
+            # 1. Direct price field on the token (most reliable when present)
+            p = _safe_price(token.get("price"))
+            if p:
+                return p
+            # 2. Bid/ask average on the token
             bid = token.get("yes_bid") or token.get("bid")
             ask = token.get("yes_ask") or token.get("ask")
-            p = token.get("price")
-
             if bid is not None and ask is not None:
-                price = (float(bid) + float(ask)) / 2
-            elif p is not None:
-                price = float(p)
-            elif bid is not None:
-                price = float(bid)
-            elif ask is not None:
-                price = float(ask)
-            else:
-                return 0.5
-
-            # Normalize if returned in 0-100 range.
-            if price > 1.0:
-                price = price / 100.0
-
-            return round(price, 4) if 0.01 <= price <= 0.99 else 0.5
+                p = _safe_price((float(bid) + float(ask)) / 2)
+                if p:
+                    return p
+            if bid is not None:
+                p = _safe_price(bid)
+                if p:
+                    return p
+            if ask is not None:
+                p = _safe_price(ask)
+                if p:
+                    return p
+            return 0.0
 
         yes_price = _price_from_token(yes_token)
-        no_price = _price_from_token(no_token)
+        no_price  = _price_from_token(no_token)
+
+        # PRIMARY FALLBACK: Gamma API returns outcomePrices as a top-level
+        # array ["0.72", "0.28"] when tokens don't carry a price field.
+        # This is the most common response format — always check it.
+        if not yes_price or not no_price:
+            outcome_prices = raw.get("outcomePrices", [])
+            if len(outcome_prices) >= 2:
+                p0 = _safe_price(outcome_prices[0])
+                p1 = _safe_price(outcome_prices[1])
+                if p0 and not yes_price:
+                    yes_price = p0
+                if p1 and not no_price:
+                    no_price = p1
+
+        # SECONDARY FALLBACK: derive one side from the other
+        if yes_price and not no_price:
+            no_price = round(1.0 - yes_price, 4)
+        if no_price and not yes_price:
+            yes_price = round(1.0 - no_price, 4)
+
+        # Last resort default
+        if not yes_price:
+            yes_price = 0.5
+        if not no_price:
+            no_price = 0.5
 
         # Derive the missing side from the other when one side is unavailable.
         if yes_price == 0.5 and no_price != 0.5:

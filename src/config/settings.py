@@ -63,20 +63,21 @@ class APIConfig:
 class EnsembleConfig:
     """Multi-model ensemble configuration."""
     enabled: bool = True
-    # Model roster for ensemble decisions
+    # Model roster — uses free-tier Groq + Gemini keys only.
+    # Set provider to "groq" or "gemini" so model_router dispatches correctly.
     models: Dict[str, Dict] = field(default_factory=lambda: {
-        "grok-beta": {"provider": "xai", "role": "forecaster", "weight": 0.30},
-        "anthropic/claude-3.5-sonnet": {"provider": "openrouter", "role": "news_analyst", "weight": 0.20},
-        "openai/gpt-4o": {"provider": "openrouter", "role": "bull_researcher", "weight": 0.20},
-        "google/gemini-flash-1.5": {"provider": "openrouter", "role": "bear_researcher", "weight": 0.15},
-        "deepseek/deepseek-r1": {"provider": "openrouter", "role": "risk_manager", "weight": 0.15},
+        "llama-3.3-70b-versatile":   {"provider": "groq",   "role": "forecaster",      "weight": 0.30},
+        "mixtral-8x7b-32768":        {"provider": "groq",   "role": "bull_researcher", "weight": 0.20},
+        "llama-3.1-8b-instant":      {"provider": "groq",   "role": "risk_manager",    "weight": 0.15},
+        "gemini-1.5-flash":          {"provider": "gemini", "role": "bear_researcher", "weight": 0.15},
+        "gemini-1.5-flash-002":      {"provider": "gemini", "role": "news_analyst",    "weight": 0.20},
     })
-    min_models_for_consensus: int = 3
-    disagreement_threshold: float = 0.25  # Std dev above this = low confidence
+    min_models_for_consensus: int = 2
+    disagreement_threshold: float = 0.25
     parallel_requests: bool = True
     debate_enabled: bool = True
     calibration_tracking: bool = True
-    max_ensemble_cost: float = 0.50  # Max cost per ensemble decision
+    max_ensemble_cost: float = 0.50
 
 
 @dataclass
@@ -168,7 +169,7 @@ class TradingConfig:
 
     # AI trading criteria - MORE PERMISSIVE
     max_analysis_cost_per_decision: float = 0.15  # INCREASED: Allow higher cost per decision (was 0.10, now 0.15)
-    min_confidence_threshold: float = 0.45  # DECREASED: Lower confidence threshold (was 0.55, now 0.45)
+    min_confidence_threshold: float = 0.65  # DECREASED: Lower confidence threshold (was 0.55, now 0.45)
 
     # Cost control and market analysis frequency - MORE PERMISSIVE
     daily_ai_budget: float = 999.0  # Demo mode: effectively disable daily AI budget pressure
@@ -231,7 +232,7 @@ max_sector_exposure: float = 0.30       # SANE: 30% sector concentration (was 90
 # System performance objectives - MORE AGGRESSIVE FOR MORE TRADES
 target_sharpe: float = 0.3              # DECREASED: Lower Sharpe requirement (was 0.5, now 0.3)
 target_return: float = 0.15             # INCREASED: Higher return target (was 0.10, now 0.15)
-min_trade_edge: float = 0.08           # DECREASED: Lower edge requirement (was 0.15, now 8%)
+min_trade_edge: float = 0.15           # DECREASED: Lower edge requirement (was 0.15, now 8%)
 min_confidence_for_large_size: float = 0.50  # DECREASED: Lower confidence requirement (was 0.65, now 50%)
 
 # === DYNAMIC EXIT STRATEGIES ===
@@ -323,4 +324,4 @@ try:
     settings.validate()
 except ValueError as e:
     print(f"Configuration validation error: {e}")
-    print("Please check your environment variables and configuration.") 
+    print("Please check your environment variables and configuration.")

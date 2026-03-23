@@ -702,59 +702,79 @@ If you do not recommend trading, use action "SKIP":
         Falls back to json_repair for malformed output.
         """
         try:
-            # Try markdown code fence first
-            json_match = re.search(r"```(?:json)?\s*(.*?)\s*```", response_text, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(1)
-            else:
-                # Bare JSON object
-                json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(0)
-                else:
-                    self.logger.warning(
-                        "No JSON found in trading decision response",
-                        response_preview=response_text[:300],
-                    )
-                    return None
+            import json, re
+            from json_repair import repair_json
 
-            # Attempt standard parse first, then repair
+            self.logger.info(f"AI RAW RESPONSE: {response_text[:300]}")
+
+            # Extract JSON flexibly
+            json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
+            if not json_match:
+                return self._parse_fallback_text(response_text)
+
+            json_str = json_match.group(0)
+
             try:
-                data = json.loads(json_str)
-            except json.JSONDecodeError:
-                repaired = repair_json(json_str)
-                if repaired:
-                    data = json.loads(repaired)
-                else:
-                    self.logger.warning("JSON repair returned empty result")
-                    return None
+                json_str = repair_json(json_str)
+            except:
+                pass
 
-            # Normalise action
-            action = data.get("action", "SKIP").upper()
-            if action in ("BUY_YES", "BUY_NO", "BUY"):
-                action = "BUY"
-            elif action in ("SELL",):
-                action = "SELL"
-            else:
-                action = "SKIP"
+            data = json.loads(json_str)
 
-            side = data.get("side", "YES").upper()
-            confidence = float(data.get("confidence", 0.5))
-            limit_price = int(data.get("limit_price", 50)) if data.get("limit_price") is not None else None
+            action = str(data.get("action", "SKIP")).upper()
+            side = str(data.get("side", "YES")).upper()
+
+            prob = data.get("probability", None)
+            conf = data.get("confidence", 0.5)
+
+            if prob is None:
+                return self._parse_fallback_text(response_text)
+
+            prob = float(prob)
+            if prob > 1:
+                prob /= 100
+
+            conf = float(conf)
+            if conf > 1:
+                conf /= 100
+
+            prob = max(0.01, min(0.99, prob))
+            conf = max(0.1, min(0.95, conf))
 
             return TradingDecision(
                 action=action,
                 side=side,
-                confidence=confidence,
-                limit_price=limit_price,
+                confidence=conf,
+                limit_price=int(prob * 100),
+                reasoning=data.get("reasoning", ""),
             )
 
         except Exception as exc:
             self.logger.error(
-                f"Error parsing trading decision: {exc}",
+                f"Parse failed: {exc}",
                 response_preview=response_text[:500] if response_text else "EMPTY",
             )
-            return None
+            return self._parse_fallback_text(response_text)
+
+    def _parse_fallback_text(self, text: str) -> Optional[TradingDecision]:
+        import re
+
+        match = re.search(r"(\d{1,3})%", text)
+        if match:
+            prob = float(match.group(1)) / 100
+        else:
+            match = re.search(r"0\.\d+", text)
+            prob = float(match.group()) if match else 0.5
+
+        prob = max(0.01, min(0.99, prob))
+
+        return TradingDecision(
+            action="BUY",
+            side="YES" if prob > 0.5 else "NO",
+            confidence=0.6,
+            limit_price=int(prob * 100),
+            reasoning="Fallback parsed",
+        )
 
     # ------------------------------------------------------------------
     # Query logging

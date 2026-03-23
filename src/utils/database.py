@@ -259,7 +259,7 @@ class DatabaseManager(TradingLoggerMixin):
                 take_profit_price REAL,
                 max_hold_hours INTEGER,
                 target_confidence_change REAL,
-                UNIQUE(market_id, side)
+                UNIQUE(market_id, side, status)
             )
         """)
 
@@ -343,30 +343,55 @@ class DatabaseManager(TradingLoggerMixin):
     async def _run_migrations(self, db: aiosqlite.Connection) -> None:
         """Run database migrations to ensure schema is up to date."""
         try:
-            # Check if positions table has the new columns
             cursor = await db.execute("PRAGMA table_info(positions)")
             columns = await cursor.fetchall()
             column_names = [col[1] for col in columns]
-            
-            # Add missing columns for enhanced exit strategy
+
             if 'stop_loss_price' not in column_names:
                 await db.execute("ALTER TABLE positions ADD COLUMN stop_loss_price REAL")
-                self.logger.info("Added stop_loss_price column to positions table")
-                
             if 'take_profit_price' not in column_names:
                 await db.execute("ALTER TABLE positions ADD COLUMN take_profit_price REAL")
-                self.logger.info("Added take_profit_price column to positions table")
-                
             if 'max_hold_hours' not in column_names:
                 await db.execute("ALTER TABLE positions ADD COLUMN max_hold_hours INTEGER")
-                self.logger.info("Added max_hold_hours column to positions table")
-                
             if 'target_confidence_change' not in column_names:
                 await db.execute("ALTER TABLE positions ADD COLUMN target_confidence_change REAL")
-                self.logger.info("Added target_confidence_change column to positions table")
-                
+
+            # FIX: Rebuild positions table with corrected UNIQUE constraint.
+            # Old: UNIQUE(market_id, side) — blocks re-opening same market after close.
+            # New: UNIQUE(market_id, side, status) — only blocks duplicate OPEN positions.
+            cursor2 = await db.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='positions'"
+            )
+            row = await cursor2.fetchone()
+            if row and "UNIQUE(market_id, side)" in row[0] and "UNIQUE(market_id, side, status)" not in row[0]:
+                self.logger.info("Migrating positions UNIQUE constraint...")
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS positions_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        market_id TEXT NOT NULL,
+                        side TEXT NOT NULL,
+                        entry_price REAL NOT NULL,
+                        quantity INTEGER NOT NULL,
+                        timestamp TEXT NOT NULL,
+                        rationale TEXT,
+                        confidence REAL,
+                        live BOOLEAN NOT NULL DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT 'open',
+                        strategy TEXT,
+                        stop_loss_price REAL,
+                        take_profit_price REAL,
+                        max_hold_hours INTEGER,
+                        target_confidence_change REAL,
+                        UNIQUE(market_id, side, status)
+                    )
+                """)
+                await db.execute("INSERT OR IGNORE INTO positions_new SELECT * FROM positions")
+                await db.execute("DROP TABLE positions")
+                await db.execute("ALTER TABLE positions_new RENAME TO positions")
+                self.logger.info("Positions UNIQUE constraint migrated successfully")
+
             await db.commit()
-            
+
         except Exception as e:
             self.logger.error(f"Error running migrations: {e}")
 

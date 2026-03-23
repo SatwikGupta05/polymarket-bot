@@ -1129,8 +1129,10 @@ async def _evaluate_immediate_trade(
         
         # NO DOLLAR MINIMUM - we'll ensure at least 1 contract below
         
-        # Determine side based on edge direction
-        side = "NO" if opportunity.edge < 0 else "YES"  # Negative edge = market overpriced = bet NO
+        # Also fix edge to stay signed (not overwritten with magnitude):
+        opportunity.edge = edge_result.edge_magnitude  # keep this — it's already signed
+        # Determine side based on predicted vs market probability (symmetric decision)
+        side = "YES" if opportunity.predicted_probability > opportunity.market_probability else "NO"
         
         # Calculate proper entry price (what we expect to pay)
         if side == "YES":
@@ -1248,8 +1250,16 @@ def _calculate_simple_kelly(opportunity: MarketOpportunity) -> float:
 
 
 def fallback_decision(market: Market) -> str:
-    """Simple fallback when AI is rate-limited or unavailable."""
-    if getattr(market, "volume", 0) > 10000:
+    """
+    Fallback when AI is unavailable. Only buys when there is a genuine
+    price signal — market far from 0.5 with high volume.
+    Avoids blindly buying every high-volume market.
+    """
+    volume = getattr(market, "volume", 0)
+    yes_price = getattr(market, "yes_price", 0.5)
+    # Only act on markets with strong price signal AND high volume
+    price_distance = abs(yes_price - 0.5)
+    if volume > 50000 and price_distance > 0.15:
         return "BUY"
     return "SKIP"
 
@@ -1261,65 +1271,140 @@ async def _get_fast_ai_prediction(
 ) -> Tuple[Optional[float], Optional[float]]:
     """
     Get a fast AI prediction for a market without expensive analysis.
+    Routes to free-tier Groq/Gemini models first; falls back to xAI if available.
     Returns (predicted_probability, confidence) or (None, None) if failed.
     """
     try:
-        # Create a simplified prompt for faster analysis
-        prompt = f"""
-        QUICK PREDICTION REQUEST
+        prompt = f"""QUICK PREDICTION REQUEST
+
+Market: {market.title}
+Current YES price: {market_price:.2f}
+
+Respond ONLY with valid JSON — no explanation, no markdown, no extra text:
+{{"probability": <0.0-1.0>, "confidence": <0.0-1.0>, "reasoning": "<1 sentence>"}}"""
+
+        # FIX: Try free-tier models first (Groq/Gemini) before paid xAI.
+        # xai_client.get_completion requires XAI_API_KEY which may not be set.
+        from src.clients import free_model_client as _free
+        import asyncio
+
+        response_text = None
+
+        # Try Groq first (fastest free model)
+        if _free._has_groq():
+            loop = asyncio.get_event_loop()
+            response_text = await loop.run_in_executor(
+                None,
+                lambda: _free._call_groq_sync(prompt, "llama-3.3-70b-versatile")
+            )
+
+        # Fall back to Gemini if Groq failed or unavailable
+        if not response_text and _free._has_gemini():
+            loop = asyncio.get_event_loop()
+            response_text = await loop.run_in_executor(
+                None,
+                lambda: _free._call_gemini_sync(prompt, "gemini-1.5-flash")
+            )
+
+        # Last resort: paid xAI (only if key is set)
+        if not response_text:
+            response_text = await xai_client.get_completion(
+                prompt, max_tokens=200, temperature=0.1
+            )
         
-        Market: {market.title}
-        Current YES price: {market_price:.2f}
-        
-        Provide a FAST prediction in JSON format:
-        {{
-            "probability": [0.0-1.0],
-            "confidence": [0.0-1.0],
-            "reasoning": "brief 1-2 sentence explanation"
-        }}
-        
-        Focus on: probability estimate and your confidence level.
-        """
-        
-        # Use AI analysis for portfolio optimization - higher tokens for reasoning models  
-        response_text = await xai_client.get_completion(
-            prompt,
-            max_tokens=3000,  # Higher for reasoning models like grok-4
-            temperature=0.1   # Low temperature for consistency
-        )
-        
-        # Check if AI response is None (API exhausted or failed)
         if response_text is None:
-            logging.getLogger("portfolio_opportunities").info(f"AI analysis unavailable for {market.market_id} due to API limits")
+            logging.getLogger("portfolio_opportunities").info(
+                f"AI analysis unavailable for {market.market_id}"
+            )
             return None, None
-        
-        # Parse JSON from the response text
-        try:
-            import json
-            import re
-            
-            # Try to extract JSON from the response
-            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(0)
-                response = json.loads(json_str)
+
+        # ── Robust parser ─────────────────────────────────────────────
+        # Models frequently return valid JSON but in the wrong schema.
+        # We handle every known variant instead of returning (None, None).
+        import json, re
+
+        def _to_float(val):
+            """Coerce string or numeric to float, return None if impossible."""
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return None
+
+        parsed = None
+        # 1. Extract JSON from code-fence or raw text
+        for pattern in [r"```json\s*(.*?)\s*```", r"\{[^{}]*\}"]:
+            m = re.search(pattern, response_text, re.DOTALL)
+            if m:
+                try:
+                    parsed = json.loads(m.group(1) if "```" in pattern else m.group(0))
+                    break
+                except (json.JSONDecodeError, ValueError):
+                    pass
+        if parsed is None:
+            try:
+                parsed = json.loads(response_text)
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        if not isinstance(parsed, dict):
+            logging.getLogger("portfolio_opportunities").warning(
+                f"No parseable JSON in AI response for {market.market_id[:20]}"
+            )
+            return None, None
+
+        log = logging.getLogger("portfolio_opportunities")
+
+        # 2. Try native probability/confidence fields first
+        probability = _to_float(parsed.get("probability"))
+        confidence  = _to_float(parsed.get("confidence"))
+
+        if probability is not None and confidence is not None:
+            if 0.0 <= probability <= 1.0 and 0.0 <= confidence <= 1.0:
+                return probability, confidence
+
+        # 3. Model returned trader-style schema {action, side, limit_price, confidence}
+        #    Map it back to probability/confidence so it is not silently dropped.
+        action = str(parsed.get("action", "")).upper()
+        side   = str(parsed.get("side",   "YES")).upper()
+        lp     = _to_float(parsed.get("limit_price"))  # cents 1-99
+        conf   = _to_float(parsed.get("confidence"))
+
+        if action in ("BUY", "SELL", "SKIP") and conf is not None:
+            if action == "SKIP":
+                # Explicit SKIP with confidence — treat as weak market_prob signal
+                log.info(
+                    f"AI returned SKIP for {market.market_id[:20]} "
+                    f"(conf={conf:.2f}) — mapping to market_price as probability"
+                )
+                return market_price, max(0.0, conf - 0.05)
+
+            # BUY/SELL: derive probability from limit_price or side + market_price
+            if lp is not None and 1 <= lp <= 99:
+                probability = lp / 100.0
+            elif side == "YES":
+                probability = min(0.95, market_price + 0.10)
             else:
-                # If no JSON found, try to parse the entire response
-                response = json.loads(response_text)
-            
-            if response and isinstance(response, dict):
-                probability = response.get('probability')
-                confidence = response.get('confidence')
-                
-                # Validate values
-                if (isinstance(probability, (int, float)) and 0 <= probability <= 1 and
-                    isinstance(confidence, (int, float)) and 0 <= confidence <= 1):
-                    return float(probability), float(confidence)
-            
-        except (json.JSONDecodeError, ValueError) as json_error:
-            logging.getLogger("portfolio_opportunities").warning(f"Failed to parse JSON from AI response for {market.market_id}: {json_error}")
-            logging.getLogger("portfolio_opportunities").debug(f"Raw response: {response_text}")
-        
+                probability = max(0.05, market_price - 0.10)
+
+            confidence = max(0.0, min(1.0, conf))
+            log.info(
+                f"AI used trader schema for {market.market_id[:20]} — "
+                f"mapped action={action} side={side} → prob={probability:.2f} conf={confidence:.2f}"
+            )
+            return probability, confidence
+
+        # 4. Partial response — at least one field present
+        if confidence is not None and 0.0 <= confidence <= 1.0:
+            log.info(
+                f"AI partial response for {market.market_id[:20]} — "
+                f"using market_price as probability, conf={confidence:.2f}"
+            )
+            return market_price, confidence
+
+        log.warning(
+            f"AI response unrecognisable for {market.market_id[:20]}: "
+            f"keys={list(parsed.keys())}"
+        )
         return None, None
         
     except Exception as e:
@@ -1374,4 +1459,4 @@ async def run_portfolio_optimization(
         
     except Exception as e:
         logger.error(f"Error in portfolio optimization: {e}")
-        return AdvancedPortfolioOptimizer(db_manager, kalshi_client, xai_client)._empty_allocation() 
+        return AdvancedPortfolioOptimizer(db_manager, kalshi_client, xai_client)._empty_allocation()
