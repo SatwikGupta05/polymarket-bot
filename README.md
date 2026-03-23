@@ -32,91 +32,42 @@ cp env.template .env
 
 # 3. Reset demo state and run
 python scripts/reset_demo.py
-python cli.py run --paper
-```
+## Architecture Flowchart
 
-Open the live dashboard in a second terminal:
+Below is a higher-level flowchart that captures ingestion, model routing (free + paid), the five role-based agents, decisioning, execution and tracking. Paste this into any Markdown viewer that supports Mermaid diagrams (e.g., GitHub, VS Code Markdown Preview, or the Streamlit docs renderer).
 
-```bash
-streamlit run dashboard.py
-```
+```mermaid
+flowchart LR
+  subgraph INGEST
+    Polymarket[Polymarket / Gamma API]
+    News[RSS / News Feeds]
+    Ingest[Market Ingestion Job]
+    Polymarket --> Ingest
+    News --> Ingest
+  end
 
-Run the backtest (no API keys needed at all):
+  subgraph MODEL_ROUTER[Model Router]
+    ModelRouter[ModelRouter]
+    subgraph PAID_TIER[Paid Tier — Five Paid Agents]
+      Lead[Lead Forecaster<br/>Grok-beta]
+      Bull[Big Bull Researcher<br/>GPT-4o]
+      Bear[Bear Researcher<br/>Gemini Flash 1.5]
+      NewsA[News Analyst<br/>Claude 3.5 Sonnet]
+      Risk[Risk Manager<br/>DeepSeek R1]
+    end
+    Free[Free Model Client<br/>(Groq + Gemini)]
+    ModelRouter --> Lead
+    ModelRouter --> Bull
+    ModelRouter --> Bear
+    ModelRouter --> NewsA
+    ModelRouter --> Risk
+    ## Demo & Utilities
 
-```bash
-python cli.py backtest --offline --report
-```
+    Demo instructions and utility scripts live in the `docs/` and `scripts/` folders. Refer to those locations for recording guidance, demo setup, and small helpers such as `remove_all_emojis.py` and `reset_demo.py`.
 
----
+    If you want the full demo checklist or individual utility examples restored in the README, tell me which parts to bring back and I'll insert a concise version.
 
-## AI Model Tiers
-
-### Free Tier (Demo-ready — default, no credit card needed)
-
-| Role | Provider | Model | Weight |
-|------|----------|-------|--------|
-| Lead Forecaster | Groq | llama-3.3-70b-versatile | 30% |
-| Bull Researcher | Groq | mixtral-8x7b-32768 | 20% |
-| Bear Researcher | Gemini | gemini-3.1-flash-lite-preview | 15% |
-| News Analyst | Gemini | gemini-3.1-flash-lite-preview | 20% |
-| Risk Manager | Groq | llama-3.1-8b-instant | 15% |
-
-**Free keys needed (both instant signup, no credit card):**
-- `GROQ_API_KEY` — [console.groq.com](https://console.groq.com)
-- `GEMINI_API_KEY` — [aistudio.google.com](https://aistudio.google.com/apikey)
-
-### Paid Tier (Optional — higher accuracy)
-
-| Role | Provider | Model | Weight |
-|------|----------|-------|--------|
-| Lead Forecaster | xAI | Grok-beta | 30% |
-| Bull Researcher | OpenRouter | GPT-4o | 20% |
-| Bear Researcher | OpenRouter | Gemini Flash 1.5 | 15% |
-| News Analyst | OpenRouter | Claude 3.5 Sonnet | 20% |
-| Risk Manager | OpenRouter | DeepSeek R1 | 15% |
-
-The bot automatically uses the best available models based on keys present in `.env`. No code changes needed to switch tiers.
-
----
-
-## Features
-
-### Multi-Model AI Ensemble
-- **Five frontier LLMs** collaborate on every decision via a structured Bull vs Bear debate protocol
-- **Role-based specialization** — each model plays a distinct analytical role
-- **Consensus gating** — positions are skipped when models diverge beyond the confidence threshold
-- **Deterministic outputs** — temperature=0 for reproducible AI reasoning
-- **Free-tier fallback** — always works with Groq + Gemini when no paid keys are present
-- **Rate limiting** — built-in throttling and 429 retry logic for free tier stability
-
-### Trading Strategies
-- **Directional trading** (50% of capital) — AI-predicted probability edge with Kelly Criterion sizing
-- **Market making** (40%) — automated limit orders capturing bid-ask spread
-- **Arbitrage detection** (10%) — cross-market opportunity scanning
-
-### Risk Management
-- **Fractional Kelly** position sizing (quarter-Kelly for safety)
-- **Hard daily loss limit** — stops trading at configurable drawdown threshold
-- **Max drawdown circuit breaker** — halts entire system at portfolio-level loss
-- **Sector concentration cap** — prevents over-concentration in any single category
-- **Daily AI cost budget** — stops AI spending when configured limit is hit
-- **Category scoring** — blocks historically losing market categories automatically
-- **24h max hold exit** — force-closes positions that would otherwise be stuck forever
-
-### On-Chain Integration (Polymarket)
-- **Polygon-native** — USDC-based, on-chain order signing via ERC-1155 tokens
-- **py-clob-client** official SDK for order placement
-- **Paper trading mode** — simulate without any real orders or wallet needed
-- **MetaMask / EOA wallet** support for live trading
-- **Token-level price fetching** — uses YES/NO token IDs for accurate CLOB prices
-
-### Dynamic Exit Strategies
-- Trailing take-profit at configurable gain threshold
-- Stop-loss at configurable per-position loss
-- Confidence-decay exits when AI conviction drops
-- Time-based exits (max hold hours)
-- Market resolution exits (binary payout on settlement)
-
+    ---
 ### Observability
 - **Real-time Streamlit dashboard** — portfolio value, positions, P&L, AI decision logs
 - **Paper trading mode** — simulate trades, track outcomes on settled markets
