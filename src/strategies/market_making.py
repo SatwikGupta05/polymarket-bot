@@ -545,31 +545,15 @@ class AdvancedMarketMaker:
                     parsed_response = json.loads(json_str)
                     
                     if isinstance(parsed_response, dict) and 'probability' in parsed_response:
-                        try:
-                            probability = float(parsed_response.get("probability", 0.5))
-                            confidence = float(parsed_response.get("confidence", 0.5))
-
-                            if probability > 1:
-                                probability /= 100
-
-                            if confidence > 1:
-                                confidence /= 100
-
-                            probability = max(0.01, min(0.99, probability))
-                            confidence = max(0.1, min(0.95, confidence))
-
-                            return {
-                                "probability": probability,
-                                "confidence": confidence
-                            }
-
-                        except Exception as e:
-                            self.logger.warning(f"Soft parse fallback used: {e}")
-                            return {
-                                "probability": 0.5,
-                                "confidence": 0.4,
-                                "fallback_used": True
-                            }
+                        # Validate the response
+                        probability = parsed_response.get('probability')
+                        confidence = parsed_response.get('confidence')
+                        
+                        if (isinstance(probability, (int, float)) and 0 <= probability <= 1 and
+                            isinstance(confidence, (int, float)) and 0 <= confidence <= 1):
+                            return parsed_response
+                        else:
+                            self.logger.warning(f"Invalid AI response format for {market.market_id}")
                     
             except (json.JSONDecodeError, ValueError) as e:
                 self.logger.warning(f"Failed to parse AI response for {market.market_id}: {e}")

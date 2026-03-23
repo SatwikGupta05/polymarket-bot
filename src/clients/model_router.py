@@ -15,7 +15,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.clients.xai_client import TradingDecision, XAIClient
 from src.clients.openrouter_client import OpenRouterClient, MODEL_PRICING
-from src.clients import free_model_client as _free
 from src.config.settings import settings
 from src.utils.logging_setup import TradingLoggerMixin
 
@@ -279,21 +278,6 @@ class ModelRouter(TradingLoggerMixin):
                 query_type=query_type,
                 market_id=market_id,
             )
-        elif provider == "groq":
-            # Free tier — run in executor so it doesn't block the event loop
-            import asyncio
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None, lambda: _free._call_groq_sync(prompt, model)
-            )
-            return result
-        elif provider == "gemini":
-            import asyncio
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None, lambda: _free._call_gemini_sync(prompt, model)
-            )
-            return result
         else:
             # openrouter (and anything else)
             client = self._ensure_openrouter()

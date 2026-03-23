@@ -654,76 +654,51 @@ Required format:
         Parse the trading decision response from the AI.
         """
         try:
-            import json, re
-            from json_repair import repair_json
-
-            self.logger.info(f"AI RAW RESPONSE: {response_text[:300]}")
-
-            # Extract JSON flexibly
-            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if not json_match:
-                return self._parse_fallback_text(response_text)
-
-            json_str = json_match.group(0)
-
-            try:
-                json_str = repair_json(json_str)
-            except:
-                pass
-
-            data = json.loads(json_str)
-
-            action = str(data.get("action", "SKIP")).upper()
-            side = str(data.get("side", "YES")).upper()
-
-            prob = data.get("probability", None)
-            conf = data.get("confidence", 0.5)
-
-            if prob is None:
-                return self._parse_fallback_text(response_text)
-
-            prob = float(prob)
-            if prob > 1:
-                prob /= 100
-
-            conf = float(conf)
-            if conf > 1:
-                conf /= 100
-
-            prob = max(0.01, min(0.99, prob))
-            conf = max(0.1, min(0.95, conf))
-
+            import json
+            import re
+            
+            # Extract JSON from the response
+            json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # Try to find JSON without code blocks
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0)
+                else:
+                    self.logger.warning("No JSON found in trading decision response")
+                    return None
+            
+            decision_data = json.loads(json_str)
+            
+            # Normalize the action
+            action = decision_data.get('action', 'SKIP').upper()
+            if action in ['BUY_YES', 'BUY']:
+                action = 'BUY'
+            elif action in ['BUY_NO']:
+                action = 'BUY'
+            elif action in ['SKIP', 'HOLD', 'PASS']:
+                action = 'SKIP'
+            
+            # Extract other fields
+            side = decision_data.get('side', 'YES').upper()
+            confidence = float(decision_data.get('confidence', 0.5))
+            limit_price = int(decision_data.get('limit_price', 50))
+            reasoning = decision_data.get('reasoning', 'No reasoning provided')
+            
             return TradingDecision(
                 action=action,
                 side=side,
-                confidence=conf,
-                limit_price=int(prob * 100),
-                reasoning=data.get("reasoning", "")
+                confidence=confidence,
+                limit_price=limit_price,
+                reasoning=reasoning
             )
-
+            
         except Exception as e:
-            self.logger.error(f"Parse failed: {e}")
-            return self._parse_fallback_text(response_text)
-
-    def _parse_fallback_text(self, text: str) -> Optional[TradingDecision]:
-        import re
-
-        match = re.search(r'(\d{1,3})%', text)
-        if match:
-            prob = float(match.group(1)) / 100
-        else:
-            match = re.search(r'0\.\d+', text)
-            prob = float(match.group()) if match else 0.5
-
-        prob = max(0.01, min(0.99, prob))
-
-        return TradingDecision(
-            action="BUY",
-            side="YES" if prob > 0.5 else "NO",
-            confidence=0.6,
-            limit_price=int(prob * 100),
-            reasoning="Fallback parsed"
-        )
+            self.logger.error(f"Error parsing trading decision: {str(e)}")
+            self.logger.debug(f"Raw response: {response_text[:500]}")
+            return None
 
     def _prepare_prompt(
         self,

@@ -579,24 +579,17 @@ class UnifiedAdvancedTradingSystem:
                         self.logger.warning(f"Missing price data for {market_id}, skipping allocation.")
                         continue
 
-                    # FIX: yes_bid_dollars / no_bid_dollars are already in 0-1 dollar range.
-                    # Dividing by 100 again produced 0.005 prices and 3000-contract positions.
                     if intended_side == "YES":
-                        price = float(current_yes_price)
+                        price = current_yes_price / 100
                     else:
-                        price = float(current_no_price)
+                        price = current_no_price / 100
 
-                    # PRICE GUARD: must be a valid Polymarket price (1 cent to 99 cents)
-                    if price < 0.01 or price > 0.99:
-                        self.logger.warning(
-                            f"Invalid price {price:.4f} for {market_id} — "
-                            f"must be 0.01-0.99. Skipping allocation."
-                        )
+                    if price <= 0:
+                        self.logger.warning(f"Invalid entry price for {market_id}: {price}, skipping allocation.")
                         continue
-
-                    # Calculate quantity — cap at 500 contracts to prevent runaway sizes
-                    raw_quantity = int(position_value / price)
-                    quantity = max(1, min(raw_quantity, 500))
+                    
+                    # Calculate quantity
+                    quantity = max(1, int(position_value / price))
                     
                     # Calculate proper stop-loss levels using Grok4 recommendations
                     from src.utils.stop_loss_calculator import StopLossCalculator
@@ -911,4 +904,4 @@ async def run_unified_trading_system(
         
     except Exception as e:
         logger.error(f"Error in unified trading system: {e}")
-        return TradingSystemResults()
+        return TradingSystemResults() 

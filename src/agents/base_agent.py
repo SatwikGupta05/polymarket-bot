@@ -124,11 +124,6 @@ class BaseAgent(ABC):
 
             parsed = self._extract_json(raw_response)
             if parsed is None:
-                self.logger.warning(
-                    "JSON extraction failed — raw model response below",
-                    agent=self.name,
-                    raw_response=raw_response[:500],
-                )
                 return self._error_result(
                     f"Failed to extract JSON from response: {raw_response[:300]}"
                 )
