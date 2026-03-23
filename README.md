@@ -34,37 +34,6 @@ cp env.template .env
 python scripts/reset_demo.py
 python cli.py run --paper
 ```
-## Architecture Flowchart
-
-Below is a higher-level flowchart that captures ingestion, model routing (free + paid), the five role-based agents, decisioning, execution and tracking. Paste this into any Markdown viewer that supports Mermaid diagrams (e.g., GitHub, VS Code Markdown Preview, or the Streamlit docs renderer).
-
-```mermaid
-flowchart LR
-  subgraph INGEST
-    Polymarket[Polymarket / Gamma API]
-    News[RSS / News Feeds]
-    Ingest[Market Ingestion Job]
-    Polymarket --> Ingest
-    News --> Ingest
-  end
-
-  subgraph MODEL_ROUTER[Model Router]
-    ModelRouter[ModelRouter]
-    subgraph PAID_TIER[Paid Tier — Five Paid Agents]
-      Lead[Lead Forecaster<br/>Grok-beta]
-      Bull[Big Bull Researcher<br/>GPT-4o]
-      Bear[Bear Researcher<br/>Gemini Flash 1.5]
-      NewsA[News Analyst<br/>Claude 3.5 Sonnet]
-      Risk[Risk Manager<br/>DeepSeek R1]
-    end
-    Free[Free Model Client<br/>(Groq + Gemini)]
-    ModelRouter --> Lead
-    ModelRouter --> Bull
-    ModelRouter --> Bear
-    ModelRouter --> NewsA
-    ModelRouter --> Risk
-  end
-```
 
 ## Observability
 - **Real-time Streamlit dashboard** — portfolio value, positions, P&L, AI decision logs
