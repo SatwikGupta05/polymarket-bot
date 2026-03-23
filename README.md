@@ -75,105 +75,102 @@ flowchart LR
 
 ---
 
-## How It Works
+## How It Works & Architecture
 
-The bot runs a four-stage pipeline on a continuous loop:
-
-```
-  INGEST                DECIDE (5-Model Ensemble)      EXECUTE        TRACK
- --------              --------------------------      ---------     --------
-
-  Polymarket  -------> Groq/Grok    (Forecaster 30%)
-  Gamma API            Gemini/Claude (News      20%)
-                       Groq/GPT-4o  (Bull       20%) --> Polygon --> P&L
-  CLOB API   -------> Gemini        (Bear       15%)    CLOB         Win Rate
-  Order Book           Groq/DeepSeek (Risk      15%)    Order        Sharpe
-                                                        Kelly        Drawdown
-  RSS / News -------> Debate --> Consensus              Sizing       Category
-  Feeds                Confidence Calibration                         Scores
-```
-
-## Architecture Flowchart
-
-Below is a high-level flowchart of the end-to-end system showing ingestion, model routing, agents, decisioning, execution and tracking. Paste this into any Markdown viewer that supports Mermaid diagrams (e.g., GitHub, VS Code Markdown Preview, or the Streamlit docs renderer).
+The bot runs a four-stage pipeline on a continuous loop. Below is the complete end-to-end flow showing data ingestion, the five-model ensemble decision process, execution, and tracking:
 
 ```mermaid
-flowchart LR
-  subgraph INGEST["Market Ingest"]
-    Polymarket["Polymarket API"]
-    News["RSS/News Feeds"]
-    Polymarket --> Ingest["Filtering"]
-    News --> Ingest
+graph LR
+  subgraph SOURCES["Data Ingestion"]
+    PM["Polymarket API"]
+    CLOB["CLOB Order Book"]
+    RSS["RSS/News Feeds"]
   end
 
-  subgraph MODELS["Paid AI Models (5 Agents)"]
-    Lead["Lead Forecaster<br/>(Grok-beta)"]
-    Bull["Bull Researcher<br/>(GPT-4o)"]
-    Bear["Bear Researcher<br/>(Gemini 1.5)"]
-    NewsA["News Analyst<br/>(Claude 3.5)"]
-    Risk["Risk Manager<br/>(DeepSeek R1)"]
+  subgraph MODELS["Five Paid AI Models"]
+    M1["Lead Forecaster<br/>Grok-beta 30%"]
+    M2["Bull Researcher<br/>GPT-4o 20%"]
+    M3["Bear Researcher<br/>Gemini 1.5 15%"]
+    M4["News Analyst<br/>Claude 3.5 20%"]
+    M5["Risk Manager<br/>DeepSeek R1 15%"]
   end
 
-  subgraph AGENTS["Agent Layer"]
-    FAg["Forecaster"]
-    BAg["Bull"]
-    BEAg["Bear"]
-    NAg["News"]
-    RAg["Risk"]
+  subgraph AGENTS["Five Agent Roles"]
+    A1["Forecaster"]
+    A2["Bull"]
+    A3["Bear"]
+    A4["News"]
+    A5["Risk"]
   end
 
-  Ingest --> Lead
-  Ingest --> Bull
-  Ingest --> Bear
-  Ingest --> NewsA
-  Ingest --> Risk
+  subgraph DECIDE["Ensemble Decision"]
+    ENS["Structured Debate<br/>Consensus & Confidence"]
+    EDGE["Edge Filter<br/>2% minimum"]
+  end
 
-  Lead --> FAg
-  Bull --> BAg
-  Bear --> BEAg
-  NewsA --> NAg
-  Risk --> RAg
+  subgraph EXECUTE["Execution Layer"]
+    STRAT["Trading Strategies<br/>Portfolio | Market Making<br/>Quick Flip Scalping"]
+    SIGN["Order Signing<br/>ERC-1155 Tokens"]
+  end
 
-  FAg --> Ensemble["5-Model Ensemble Debate"]
-  BAg --> Ensemble
-  BEAg --> Ensemble
-  NAg --> Ensemble
-  RAg --> Ensemble
+  subgraph TRACK["Tracking & Monitoring"]
+    DB["SQLite Telemetry<br/>All Decisions & Positions"]
+    EXIT["Exit Manager<br/>Stop Loss | Take Profit<br/>Time-Based | Confidence Decay"]
+    DASH["Streamlit Dashboard<br/>Real-Time P&L & Metrics"]
+  end
 
-  Ensemble --> Filter["Confidence & Edge Filter"]
+  PM --> M1
+  PM --> M2
+  CLOB --> M3
+  RSS --> M4
+  RSS --> M5
 
-  Filter --> Portfolio["Portfolio Optimizer"]
-  Filter --> MM["Market Making"]
-  Filter --> QF["Quick Flip"]
+  M1 --> A1
+  M2 --> A2
+  M3 --> A3
+  M4 --> A4
+  M5 --> A5
 
-  Portfolio --> Execute["Execute on Polymarket"]
-  MM --> Execute
-  QF --> Execute
+  A1 --> ENS
+  A2 --> ENS
+  A3 --> ENS
+  A4 --> ENS
+  A5 --> ENS
 
-  Execute --> CLOB["CLOB API"]
-  CLOB --> DB["SQLite Telemetry"]
+  ENS --> EDGE
+  EDGE --> STRAT
+  STRAT --> SIGN
+  SIGN --> DB
 
-  DB --> Exits["Exit Manager"]
-  DB --> Dashboard["Streamlit Dashboard"]
+  DB --> EXIT
+  DB --> DASH
+  EXIT --> DASH
 
-  Exits --> PnL["P&L & Metrics"]
-  Dashboard --> PnL
-
-  classDef paid fill:#ffe0b2,stroke:#e65100,stroke-width:2px,color:#000
-  classDef agent fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000
-  classDef infra fill:#eceff1,stroke:#37474f,stroke-width:1px,color:#000
-
-  class Lead,Bull,Bear,NewsA,Risk paid
-  class FAg,BAg,BEAg,NAg,RAg agent
-  class CLOB,DB infra
+  style SOURCES fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
+  style M1 fill:#ffe0b2,stroke:#e65100,stroke-width:2px,color:#000
+  style M2 fill:#ffe0b2,stroke:#e65100,stroke-width:2px,color:#000
+  style M3 fill:#ffe0b2,stroke:#e65100,stroke-width:2px,color:#000
+  style M4 fill:#ffe0b2,stroke:#e65100,stroke-width:2px,color:#000
+  style M5 fill:#ffe0b2,stroke:#e65100,stroke-width:2px,color:#000
+  style A1 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000
+  style A2 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000
+  style A3 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000
+  style A4 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000
+  style A5 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000
+  style ENS fill:#fff9c4,stroke:#f57f17,stroke-width:2px,color:#000
+  style EDGE fill:#fff9c4,stroke:#f57f17,stroke-width:2px,color:#000
+  style STRAT fill:#e1bee7,stroke:#6a1b9a,stroke-width:2px,color:#000
+  style SIGN fill:#e1bee7,stroke:#6a1b9a,stroke-width:2px,color:#000
+  style DB fill:#eceff1,stroke:#37474f,stroke-width:2px,color:#000
+  style EXIT fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px,color:#000
+  style DASH fill:#bbdefb,stroke:#1565c0,stroke-width:2px,color:#000
 ```
 
-
 ### Stage 1 — Ingest
-Active markets are fetched from the Polymarket Gamma API every 60 seconds. Markets are filtered by volume, time to expiry, and category score. Top 5 markets by volume are passed to the AI for cost-efficient analysis.
+Active markets are fetched from the Polymarket Gamma API every 60 seconds (parallel with CLOB order book and RSS feeds). Markets are filtered by volume, time to expiry, and category score. Top 5 markets by volume are passed to the five AI models.
 
-### Stage 2 — Decide (Multi-Model Ensemble)
-Each of the five models analyzes the market from its assigned perspective and returns a probability estimate and confidence score. The ensemble combines weighted votes:
+### Stage 2 — Decide (Five-Model Ensemble)
+Each of the five models analyzes the market from its assigned perspective with role-specific weights and returns a probability estimate and confidence score. The ensemble combines weighted votes:
 
 - If weighted confidence falls below `min_confidence_to_trade` (default: 0.40), the opportunity is skipped
 - If models disagree significantly (high variance), position size is automatically reduced
@@ -181,10 +178,10 @@ Each of the five models analyzes the market from its assigned perspective and re
 - Minimum 2% edge required to proceed to execution
 
 ### Stage 3 — Execute
-Qualifying trades are sized using the Kelly Criterion (quarter-Kelly) and either logged as paper signals or routed through the Polymarket CLOB API using the YES or NO token ID for the specific outcome. Market-making orders are placed symmetrically around the mid-price.
+Qualifying trades are sized using the Kelly Criterion (quarter-Kelly) and either logged as paper signals or signed as ERC-1155 orders and routed through the Polymarket CLOB API using the YES or NO token ID for the specific outcome. Three parallel strategies handle allocation: portfolio optimization, market-making (limit orders), and quick-flip scalping.
 
 ### Stage 4 — Track
-Every decision is written to SQLite. Positions are monitored for stop-loss, take-profit, time-based, and market resolution exits. PnL is calculated correctly per side (YES: exit-entry, NO: entry-exit).
+Every decision is written to SQLite. Positions are monitored for stop-loss, take-profit, time-based, and confidence-decay exits. The Streamlit dashboard shows real-time portfolio P&L, win rate, Sharpe ratio, drawdown, and category-level scores.
 
 ---
 
