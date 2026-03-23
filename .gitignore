@@ -1,0 +1,51 @@
+# Secrets and local config
+.env
+.env*
+*.pem
+*.key
+secrets.json
+secrets.yaml
+config.json
+credentials.json
+api_keys.txt
+
+# Python environments and caches
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local runtime data
+logs/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated analysis outputs
+performance_analysis_*.json
+performance_analysis_*.txt
+grok4_full_analysis.txt
+grok4_analysis_*.txt
+grok4_analysis_*.json
+*_analysis_*.json
+*_analysis_*.txt
+dashboard_*.json
+
+# Editor and OS files
+.idea/
+.vscode/
+.cursor/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*~

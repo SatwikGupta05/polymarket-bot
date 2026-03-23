@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polymarket AI Bot — Paper Trading Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root { --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #c9d1d9;
+           --green: #3fb950; --red: #f85149; --yellow: #d29922; --blue: #58a6ff; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          background: var(--bg); color: var(--text); padding: 1.5rem; }
+  h1 { color: #fff; margin-bottom: .25rem; }
+  .subtitle { color: #8b949e; margin-bottom: 1.5rem; font-size: .9rem; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr));
+            gap: 1rem; margin-bottom: 1.5rem; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+           padding: 1rem; text-align: center; }
+  .stat .value { font-size: 1.8rem; font-weight: 700; }
+  .stat .label { font-size: .75rem; color: #8b949e; margin-top: .25rem; }
+  .stat .value.pos { color: var(--green); }
+  .stat .value.neg { color: var(--red); }
+  .chart-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+                 padding: 1rem; margin-bottom: 1.5rem; max-height: 300px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card);
+           border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  th { background: #21262d; text-align: left; padding: .6rem .8rem; font-size: .75rem;
+        text-transform: uppercase; color: #8b949e; position: sticky; top: 0; }
+  td { padding: .5rem .8rem; border-top: 1px solid var(--border); font-size: .85rem; }
+  tr:hover { background: #1c2128; }
+  .badge { padding: 2px 8px; border-radius: 12px; font-size: .75rem; font-weight: 600; }
+  .badge.win { background: #23302a; color: var(--green); }
+  .badge.loss { background: #30201f; color: var(--red); }
+  .badge.pending { background: #2a2415; color: var(--yellow); }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  .table-wrap { overflow-x: auto; }
+  a { color: var(--blue); text-decoration: none; }
+  footer { margin-top: 2rem; text-align: center; color: #484f58; font-size: .8rem; }
+</style>
+</head>
+<body>
+<h1>[STATS] Paper Trading Dashboard</h1>
+<p class="subtitle">Polymarket AI Trading Bot — Signal tracker &amp; hypothetical P&amp;L · Updated 2026-03-23 10:45 UTC</p>
+
+<div class="stats">
+  <div class="stat"><div class="value">8</div><div class="label">Total Signals</div></div>
+  <div class="stat"><div class="value">0</div><div class="label">Settled</div></div>
+  <div class="stat"><div class="value">8</div><div class="label">Pending</div></div>
+  <div class="stat"><div class="value">0.0%</div><div class="label">Win Rate</div></div>
+  <div class="stat"><div class="value pos">$0.00</div><div class="label">Total P&amp;L</div></div>
+  <div class="stat"><div class="value">$0.0000</div><div class="label">Avg Return / Trade</div></div>
+  <div class="stat"><div class="value pos">$0.00</div><div class="label">Best Trade</div></div>
+  <div class="stat"><div class="value neg">$0.00</div><div class="label">Worst Trade</div></div>
+</div>
+
+<div class="chart-wrap">
+  <canvas id="pnlChart"></canvas>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr>
+  <th>Time</th><th>Market</th><th>Side</th><th>Entry</th><th>Conf</th>
+  <th>Strategy</th><th>Outcome</th><th>P&amp;L</th><th>Reasoning</th>
+</tr></thead>
+<tbody>
+        <tr>
+            <td>2026-03-21 12:24</td>
+            <td title="0x2499928ffbe6022444543dcd940075259cecb5e41e346284b578cb64e1404d32">Will Harvey Weinstein be sentenced to more than 30…</td>
+            <td>NO</td>
+            <td>50%</td>
+            <td>70%</td>
+            <td>directional</td>
+            <td><span class="badge pending">PENDING</span></td>
+            <td class="">—</td>
+            <td title="estimated probability 42%">estimated probability 42%</td>
+        </tr>
+        <tr>
+            <td>2026-03-21 12:24</td>
+            <td title="0x3d495a3e05eaffe438bb1c2ab97ed57a79b0a6ab18a2ca6fa5b448e20ce70082">Will Harvey Weinstein be sentenced to between 10 a…</td>
+            <td>YES</td>
+            <td>50%</td>
+            <td>72%</td>
+            <td>directional</td>
+            <td><span class="badge pending">PENDING</span></td>
+            <td class="">—</td>
+            <td title="estimated probability 58%">estimated probability 58%</td>
+        </tr>
+        <tr>
+            <td>2026-03-21 12:24</td>
+            <td title="0x3209617364a0d598435806b59d0d056b606022dc9028c466ad7912df94fc170c">Will Harvey Weinstein be sentenced to between 5 an…</td>
+            <td>YES</td>
+            <td>50%</td>
+            <td>70%</td>
+            <td>directional</td>
+            <td><span class="badge pending">PENDING</span></td>
+            <td class="">—</td>
+            <td title="Estimated true YES probability is 60%, which gives an EV of 10% (60 - 50 = 10). Considering the Critic's points, I've adjusted my confidence level to 0.70. The limit price of 55 is set to balance the potential upside with the risk of the trade, given the available cash and max risk per trade.">Estimated true YES probability is 60%, w…</td>
+        </tr>
+        <tr>
+            <td>2026-03-21 12:24</td>
+            <td title="0xe2b48e3b44de9658ee9c8b37354301763e33c0b502fd966839d644b4c0a9dea8">Will Harvey Weinstein be sentenced to less than 5 …</td>
+            <td>YES</td>
+            <td>50%</td>
+            <td>70%</td>
+            <td>directional</td>
+            <td><span class="badge pending">PENDING</span></td>
+            <td class="">—</td>
+            <td title="Estimated true YES probability is 58% based on historical sentencing data for similar cases, suggesting an EV of 8% (58 - 50). Given the market context and news summary, the forecaster's estimate appears reasonable. The critic's concerns about potential biases in the sentencing process are noted, but the available data supports the forecast. With an EV of 8%, the trade is justified, and the limit price is set to 55 to balance risk and potential return.">Estimated true YES probability is 58% ba…</td>
+        </tr>
+        <tr>
+            <td>2026-03-21 07:40</td>
+            <td title="0xdee5db5410b362783a1405b66b9aa08a7d050ae1f99e8da85b9d1ae7962dad3b">Will Harvey Weinstein be sentenced to between 20 a…</td>
+            <td>YES</td>
+            <td>50%</td>
+            <td>70%</td>
+            <td>directional</td>
+            <td><span class="badge pending">PENDING</span></td>
+            <td class="">—</td>
+            <td title="Estimated true probability of YES is 60%, market price is 50%, resulting in an EV of 10%. Given the potential for a sentence within the 20-30 year range based on the severity of the crimes, I believe the market is undervaluing the YES contract. The critic's points about uncertainty are noted, but the current market price presents an opportunity to buy at a favorable price.">Estimated true probability of YES is 60%…</td>
+        </tr>
+        <tr>
+            <td>2026-03-21 07:40</td>
+            <td title="0x3d495a3e05eaffe438bb1c2ab97ed57a79b0a6ab18a2ca6fa5b448e20ce70082">Will Harvey Weinstein be sentenced to between 10 a…</td>
+            <td>YES</td>
+            <td>50%</td>
+            <td>70%</td>
+            <td>directional</td>
+            <td><span class="badge pending">PENDING</span></td>
+            <td class="">—</td>
+            <td title="Estimated true YES probability is 55%, market price is 50%. EV calculation: (55 - 50) = 5%. Although the EV is less than the 10% trigger, considering the critic's adjustment and the potential for the sentence to be within the 10-20 year range due to the nature of the crimes, the trade is justified at a limit price of 55. Confidence is 0.70 due to the unpredictability of legal outcomes but the overall likelihood based on similar cases.">Estimated true YES probability is 55%, m…</td>
+        </tr>
+        <tr>
+            <td>2026-03-21 07:40</td>
+            <td title="0x3209617364a0d598435806b59d0d056b606022dc9028c466ad7912df94fc170c">Will Harvey Weinstein be sentenced to between 5 an…</td>
+            <td>YES</td>
+            <td>50%</td>
+            <td>70%</td>
+            <td>directional</td>
+            <td><span class="badge pending">PENDING</span></td>
+            <td class="">—</td>
+            <td title="Estimated true YES probability is 60%, market price is 50%, resulting in an EV of 10%. Considering the potential for the judge to sentence within the 5-10 year range and the current market uncertainty, I believe there is value in buying the YES contract at a limit price of 58.">Estimated true YES probability is 60%, m…</td>
+        </tr>
+        <tr>
+            <td>2026-03-21 07:40</td>
+            <td title="0xe2b48e3b44de9658ee9c8b37354301763e33c0b502fd966839d644b4c0a9dea8">Will Harvey Weinstein be sentenced to less than 5 …</td>
+            <td>YES</td>
+            <td>50%</td>
+            <td>70%</td>
+            <td>directional</td>
+            <td><span class="badge pending">PENDING</span></td>
+            <td class="">—</td>
+            <td title="Estimated true YES probability is 58% based on historical sentencing data for similar cases, suggesting an EV of 8% (58 - 50). Given the market context and news summary, the forecast seems reasonable, but the critic notes that sentencing can be unpredictable. However, the EV calculation justifies a BUY action with a limit price of 55.">Estimated true YES probability is 58% ba…</td>
+        </tr>
+</tbody>
+</table>
+</div>
+
+<footer>
+  Generated by the Polymarket AI trading bot · Paper trading mode · Not financial advice
+</footer>
+
+<script>
+const data = [];
+if (data.length > 0) {
+  new Chart(document.getElementById('pnlChart'), {
+    type: 'line',
+    data: {
+      labels: data.map(d => d.x.slice(0,10)),
+      datasets: [{
+        label: 'Cumulative P&L ($)',
+        data: data.map(d => d.y),
+        borderColor: data[data.length-1].y >= 0 ? '#3fb950' : '#f85149',
+        backgroundColor: 'transparent',
+        tension: 0.3,
+        pointRadius: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#8b949e', maxTicksLimit: 10 }, grid: { color: '#21262d' } },
+        y: { ticks: { color: '#8b949e', callback: v => '$'+v }, grid: { color: '#21262d' } }
+      }
+    }
+  });
+}
+</script>
+</body>
+</html>

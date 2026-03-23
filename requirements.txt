@@ -1,0 +1,45 @@
+# ============================================================
+#  Polymarket AI Trading Bot — Requirements
+#  Verified working as of March 2026
+# ============================================================
+
+# --- Polymarket (optional — only needed for live trading) ---
+# py-clob-client>=0.34.6
+# eth-account>=0.10.0
+# web3>=6.0.0
+
+# --- HTTP ---
+httpx>=0.27.0
+
+# --- AI Providers ---
+# Free tier: GROQ_API_KEY (console.groq.com) + GEMINI_API_KEY (aistudio.google.com)
+# Both use httpx — no extra package needed
+
+# Paid tier (optional)
+xai-sdk>=0.0.1          # xAI Grok
+openai>=1.40.0          # OpenRouter / OpenAI
+
+# --- Data & Async ---
+aiosqlite>=0.20.0
+feedparser>=6.0.11
+json-repair>=0.25.0
+numpy>=1.26.0
+pandas>=2.2.0
+
+# --- Config ---
+python-dotenv>=1.0.0
+pydantic>=2.7.0
+cryptography>=42.0.0
+
+# --- Dashboard ---
+streamlit>=1.35.0
+plotly>=5.22.0
+
+# --- Logging ---
+structlog>=24.1.0
+rich>=13.7.0
+
+# --- Testing ---
+pytest>=8.2.0
+pytest-asyncio>=0.23.0
+black>=24.4.0

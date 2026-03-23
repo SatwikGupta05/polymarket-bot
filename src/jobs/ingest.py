@@ -1,0 +1,182 @@
+"""
+Market Ingestion Job
+
+This job fetches active markets from the Polymarket APIs, transforms them into a structured format,
+and upserts them into the database.
+"""
+import asyncio
+import time
+from datetime import datetime, timezone
+from typing import Optional, List
+
+from src.clients.polymarket_client import PolymarketClient
+from src.utils.database import DatabaseManager, Market
+from src.config.settings import settings
+from src.utils.logging_setup import get_trading_logger
+
+
+async def process_and_queue_markets(
+    markets_data: List[dict],
+    db_manager: DatabaseManager,
+    queue: asyncio.Queue,
+    existing_position_market_ids: set,
+    logger,
+):
+    """
+    Transforms market data, upserts to DB, and puts eligible markets on the queue.
+    """
+    markets_to_upsert = []
+    for market_data in markets_data:
+        # A simple approach is to take the average of bid and ask.
+        # Kalshi API v2 uses dollar-denominated fields (yes_bid_dollars, yes_ask_dollars)
+        # These are already in dollars (e.g., 0.5000 = $0.50)
+        # Fall back to legacy cent-based fields (yes_bid, yes_ask) divided by 100
+        if "yes_bid_dollars" in market_data:
+            yes_bid = float(market_data.get("yes_bid_dollars", 0) or 0)
+            yes_ask = float(market_data.get("yes_ask_dollars", 0) or 0)
+            no_bid = float(market_data.get("no_bid_dollars", 0) or 0)
+            no_ask = float(market_data.get("no_ask_dollars", 0) or 0)
+            yes_price = (yes_bid + yes_ask) / 2
+            no_price = (no_bid + no_ask) / 2
+        else:
+            # Legacy API: values in cents (0-100)
+            yes_price = (market_data.get("yes_bid", 0) + market_data.get("yes_ask", 0)) / 2 / 100
+            no_price = (market_data.get("no_bid", 0) + market_data.get("no_ask", 0)) / 2 / 100
+
+        # Kalshi API v2 uses volume_fp (string/float) instead of volume (int)
+        volume = int(float(market_data.get("volume_fp", 0) or market_data.get("volume", 0) or 0))
+
+        normalized_market_id = str(market_data["ticker"]).strip().lower()
+        has_position = normalized_market_id in existing_position_market_ids
+
+        market = Market(
+            market_id=normalized_market_id,
+            title=market_data["title"],
+            yes_price=yes_price,
+            no_price=no_price,
+            volume=volume,
+            expiration_ts=int(
+                datetime.fromisoformat(
+                    market_data.get("expiration_time", "2099-01-01T00:00:00Z").replace("Z", "+00:00")
+                ).timestamp()
+            ),
+            category=market_data.get("category", "misc"),
+            status=market_data.get("status", "active"),
+            last_updated=datetime.now(timezone.utc),
+            has_position=has_position,
+        )
+        markets_to_upsert.append(market)
+
+    if markets_to_upsert:
+        await db_manager.upsert_markets(markets_to_upsert)
+        logger.info(f"Successfully upserted {len(markets_to_upsert)} markets.")
+
+        # Primary filtering criteria - MORE PERMISSIVE FOR MORE OPPORTUNITIES!
+        min_volume: float = 0.0  # Demo mode: ingest all market volumes
+        min_volume_for_ai_analysis: float = 150.0  # DECREASED: Lower volume for AI analysis (was 200, now 150)  
+        preferred_categories: List[str] = []  # Empty = all categories allowed
+        excluded_categories: List[str] = []  # Empty = no categories excluded
+
+        # Enhanced filtering for better opportunities - MORE PERMISSIVE FOR MORE TRADES
+        min_price_movement: float = 0.015  # DECREASED: Even lower minimum range (was 0.02, now 1.5¢)
+        max_bid_ask_spread: float = 0.20   # INCREASED: Allow even wider spreads (was 0.15, now 20¢)
+        min_confidence_for_long_term: float = 0.40  # DECREASED: Lower confidence required (was 0.5, now 40%)
+
+        eligible_markets = [
+            m
+            for m in markets_to_upsert
+            if m.volume >= min_volume
+            # REMOVED TIME RESTRICTION - we can now trade markets with ANY deadline!
+            # Dynamic exit strategies will handle timing automatically
+            and (
+                not settings.trading.preferred_categories
+                or m.category in settings.trading.preferred_categories
+            )
+            and m.category not in settings.trading.excluded_categories
+        ]
+
+        logger.info(
+            f"Found {len(eligible_markets)} eligible markets to process in this batch."
+        )
+        # FIX 4: limit to top 5 markets by volume to avoid overloading free-tier AI
+        top_markets = sorted(
+            eligible_markets,
+            key=lambda m: m.volume,
+            reverse=True
+        )[:5]
+
+        logger.info(f"Throttled to top {len(top_markets)} markets for AI analysis (free tier)")
+
+        for market in top_markets:
+            await queue.put(market)
+
+    else:
+        logger.info("No new markets to upsert in this batch.")
+
+
+async def run_ingestion(
+    db_manager: DatabaseManager,
+    queue: asyncio.Queue,
+    market_ticker: Optional[str] = None,
+):
+    """
+    Main function for the market ingestion job.
+
+    Args:
+        db_manager: DatabaseManager instance.
+        queue: asyncio.Queue to put ingested markets into.
+        market_ticker: Optional specific market ticker to ingest.
+    """
+    logger = get_trading_logger("market_ingestion")
+    logger.info("Starting market ingestion job.", market_ticker=market_ticker)
+
+    polymarket_client = PolymarketClient()
+
+    try:
+        # Get all market IDs with existing positions
+        existing_position_market_ids = await db_manager.get_markets_with_positions()
+
+        if market_ticker:
+            logger.info(f"Fetching single market: {market_ticker}")
+            market_response = await polymarket_client.get_market(ticker=market_ticker)
+            if market_response and "market" in market_response:
+                await process_and_queue_markets(
+                    [market_response["market"]],
+                    db_manager,
+                    queue,
+                    existing_position_market_ids,
+                    logger,
+                )
+            else:
+                logger.warning(f"Could not find market with ticker: {market_ticker}")
+        else:
+            logger.info("Fetching all active markets from Polymarket API with pagination.")
+            cursor = None
+            while True:
+                response = await polymarket_client.get_markets(limit=100, cursor=cursor)
+                markets_page = response.get("markets", [])
+
+                active_markets = [m for m in markets_page if m.get("status") == "active"]
+                if active_markets:
+                    logger.info(
+                        f"Fetched {len(markets_page)} markets, {len(active_markets)} are active."
+                    )
+                    await process_and_queue_markets(
+                        active_markets,
+                        db_manager,
+                        queue,
+                        existing_position_market_ids,
+                        logger,
+                    )
+
+                cursor = response.get("cursor")
+                if not cursor:
+                    break
+
+    except Exception as e:
+        logger.error(
+            "An error occurred during market ingestion.", error=str(e), exc_info=True
+        )
+    finally:
+        await polymarket_client.close()
+        logger.info("Market ingestion job finished.")
